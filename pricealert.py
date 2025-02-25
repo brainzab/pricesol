@@ -91,7 +91,7 @@ async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "percent": percent,
         "last_market_cap": temp_data["market_cap"],
         "name": temp_data["name"],
-        "chat_id": temp_data["chat_id"]  # Сохраняем chat_id для оповещений
+        "chat_id": temp_data["chat_id"]
     }
     
     await update.message.reply_text(
@@ -140,7 +140,6 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
         current_price = result["price"]
         current_market_cap = result["market_cap"]
         last_price = data["last_price"]
-        last_market_cap = data["last_market_cap"]
         percent_change = abs((current_price - last_price) / last_price * 100)
         
         if percent_change >= data["percent"]:
@@ -149,15 +148,15 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=data["chat_id"],
                 text=f"{emoji} Цена токена '{data['name']}' {direction} на {percent_change:.2f}%!\n"
-                     f"Цена: Было ${last_price:.6f} | Стало ${current_price:.6f}\n"
-                     f"Market Cap: Было ${last_market_cap:,.2f} | Стало ${current_market_cap:,.2f}"
+                     f"Цена: ${current_price:.6f}\n"
+                     f"Market Cap: ${current_market_cap:,.2f}"
             )
             tracked_tokens[token_address]["last_price"] = current_price
             tracked_tokens[token_address]["last_market_cap"] = current_market_cap
 
 def main():
     # Вставьте ваш токен от BotFather
-    bot_token = "7522266813:AAFFKpmyKBrubAmynNbhLsqa78E8mO5xQeA"
+    bot_token = "YOUR_TELEGRAM_BOT_TOKEN"
     
     application = Application.builder().token(bot_token).build()
     
