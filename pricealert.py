@@ -1,12 +1,13 @@
 import requests
 import time
+import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 # Состояния для ConversationHandler
 ADDRESS, NAME, PERCENT = range(3)
 
-# Хранилище токенов: {token_address: {"last_price": float, "percent": float, "last_market_cap": float, "name": str, "chat_id": int}}
+# Хранилище токенов
 tracked_tokens = {}
 
 # Временное хранилище данных во время добавления токена
@@ -57,7 +58,7 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_data["address"] = token_address
     temp_data["price"] = result["price"]
     temp_data["market_cap"] = result["market_cap"]
-    temp_data["chat_id"] = update.effective_chat.id  # Сохраняем chat_id пользователя
+    temp_data["chat_id"] = update.effective_chat.id
     
     await update.message.reply_text(
         f"Токен с адресом {token_address} найден.\n"
@@ -98,7 +99,7 @@ async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Токен '{temp_data['name']}' ({token_address}) добавлен.\n"
         f"Оповещение при изменении на {percent}%"
     )
-    temp_data.clear()  # Очищаем временные данные
+    temp_data.clear()
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -155,12 +156,12 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
             tracked_tokens[token_address]["last_market_cap"] = current_market_cap
 
 def main():
-    # Вставьте ваш токен от BotFather
-    bot_token = "YOUR_TELEGRAM_BOT_TOKEN"
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        raise ValueError("TELEGRAM_BOT_TOKEN не задан в переменных окружения")
     
     application = Application.builder().token(bot_token).build()
     
-    # Настройка ConversationHandler для добавления токена
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("add", add_token_start)],
         states={
@@ -170,16 +171,13 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)]
     )
     
-    # Регистрируем обработчики
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("remove", remove_token))
     application.add_handler(CommandHandler("list", list_tokens))
     
-    # Задаём периодическую проверку цен (каждые 60 секунд)
     application.job_queue.run_repeating(check_prices, interval=60, first=10)
     
-    # Запускаем бота
     application.run_polling()
 
 if __name__ == "__main__":
