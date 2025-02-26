@@ -40,10 +40,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tracked_tokens[chat_id] = {}
     await update.message.reply_text(
         "👋 <b>Привет!</b> Я бот для отслеживания цен токенов на Solana.\n"
+        "\n"
         "<b>Команды:</b>\n"
-        "<code>/add адрес_токена</code> — начать добавление токена\n"
-        "<code>/remove адрес_токена</code> — убрать токен\n"
-        "<code>/list</code> — показать список отслеживаемых токенов",
+        "<b>/add</b> <i>адрес_токена</i> — начать добавление токена\n"
+        "<b>/remove</b> <i>адрес_токена</i> — убрать токен\n"
+        "<b>/list</b> — показать список отслеживаемых токенов",
         parse_mode="HTML"
     )
 
@@ -55,8 +56,8 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) != 1:
         await update.message.reply_text(
-            "Используйте: <code>/add адрес_токена</code>\n"
-            "Пример: <code>/add 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</code>",
+            "Используйте: <b>/add</b> <i>адрес_токена</i>\n"  # Убран <code>, команды жирные, адрес_токена курсивом
+            "Пример: <b>/add</b> <i>7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</i>",
             parse_mode="HTML"
         )
         return ConversationHandler.END
@@ -75,8 +76,8 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"✅ Токен с адресом <code>{token_address}</code> найден.\n"
-        f"Текущая цена: <b><code>${result['price']:.6f}</code></b>\n"
-        f"Текущий Market Cap: <b><code>${result['market_cap']:,.2f}</code></b>\n"
+        f"Текущая цена: <b>${result['price']:.6f}</b>\n"
+        f"Текущий Market Cap: <b>${result['market_cap']:,.2f}</b>\n"
         "Пожалуйста, введите <b>название токена</b>:",
         parse_mode="HTML"
     )
@@ -140,7 +141,7 @@ async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) != 1:
         await update.message.reply_text(
-            "Используйте: <code>/remove адрес_токена</code>",
+            "Используйте: <b>/remove</b> <i>адрес_токена</i>",  # Убран <code>, команда жирная, адрес_токена курсивом
             parse_mode="HTML"
         )
         return
@@ -185,7 +186,7 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response += (f"<b>{data['name']}</b> (<code>{token}</code>)\n"
                      f"Оповещение: <b>{data['percent']}%</b>\n"
                      f"Изменение за 24ч: {emoji_24h} <b>{price_change_24h}%</b>\n"
-                     f"<a href='{dexscreener_url}'>Чарт на Dexscreener</a>\n\n")
+                     f"<a href='{dexscreener_url}'><i>Чарт на Dexscreener</i></a>\n\n")
     await update.message.reply_text(response, parse_mode="HTML", disable_web_page_preview=True)
 
 async def check_prices(context: ContextTypes.DEFAULT_TYPE):
@@ -214,7 +215,7 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
                     text=f"{emoji} Цена токена <b>{data['name']}</b> {direction} на <b>{percent_change:.2f}%</b>!\n"
                          f"Цена: <b>${current_price:.6f}</b>\n"
                          f"Market Cap: <b>${current_market_cap:,.2f}</b>\n\n"
-                         f"<a href='{dexscreener_url}'>Чарт на Dexscreener</a>",
+                         f"<a href='{dexscreener_url}'><i>Чарт на Dexscreener</i></a>",
                     parse_mode="HTML",
                     disable_web_page_preview=True
                 )
