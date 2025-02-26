@@ -36,42 +36,48 @@ def get_token_price(token_address):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id not in tracked_tokens:
-        tracked_tokens[chat_id] = {}  # Новый пользователь начинает с пустого словаря
+        tracked_tokens[chat_id] = {}
     await update.message.reply_text(
-        "Привет! Я бот для отслеживания цен токенов на Solana.\n"
-        "Команды:\n"
-        "/add <адрес_токена> - начать добавление токена\n"
-        "/remove <адрес_токена> - убрать токен\n"
-        "/list - показать список отслеживаемых токенов"
+        "👋 <b>Привет!</b> Я бот для отслеживания цен токенов на Solana.<br>"
+        "<b>Команды:</b><br>"
+        "<code>/add <адрес_токена></code> — начать добавление токена<br>"
+        "<code>/remove <адрес_токена></code> — убрать токен<br>"
+        "<code>/list</code> — показать список отслеживаемых токенов",
+        parse_mode="HTML"
     )
 
 async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id not in tracked_tokens:
-        tracked_tokens[chat_id] = {}  # Инициализируем пустой словарь для нового пользователя
+        tracked_tokens[chat_id] = {}
     
     args = context.args
     if len(args) != 1:
-        await update.message.reply_text("Используйте: /add <адрес_токена>\nПример: /add 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU")
+        await update.message.reply_text(
+            "Используйте: <code>/add <адрес_токена></code><br>"
+            "Пример: <code>/add 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</code>",
+            parse_mode="HTML"
+        )
         return ConversationHandler.END
     
     token_address = args[0]
     result = get_token_price(token_address)
     
     if "error" in result:
-        await update.message.reply_text(f"Не удалось найти токен: {result['error']}")
+        await update.message.reply_text(f"❌ Не удалось найти токен: <i>{result['error']}</i>", parse_mode="HTML")
         return ConversationHandler.END
     
     temp_data["address"] = token_address
     temp_data["price"] = result["price"]
     temp_data["market_cap"] = result["market_cap"]
-    temp_data["chat_id"] = chat_id  # Сохраняем chat_id для текущего пользователя
+    temp_data["chat_id"] = chat_id
     
     await update.message.reply_text(
-        f"Токен с адресом {token_address} найден.\n"
-        f"Текущая цена: ${result['price']:.6f}\n"
-        f"Текущий Market Cap: ${result['market_cap']:,.2f}\n"
-        "Пожалуйста, введите название токена:"
+        f"✅ Токен с адресом <a href='tg://msg_url?url={token_address}'>{token_address}</a> найден.<br>"
+        f"Текущая цена: <b>${result['price']:.6f}</b><br>"
+        f"Текущий Market Cap: <b>${result['market_cap']:,.2f}</b><br>"
+        "Пожалуйста, введите <b>название токена</b>:",
+        parse_mode="HTML"
     )
     return NAME
 
@@ -79,7 +85,11 @@ async def add_token_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token_name = update.message.text.strip()
     temp_data["name"] = token_name
     
-    await update.message.reply_text(f"Название '{token_name}' принято.\nПожалуйста, введите процент изменения цены (от 1 до 1000):")
+    await update.message.reply_text(
+        f"✅ Название <b>{token_name}</b> принято.<br>"
+        "Пожалуйста, введите <b>процент изменения цены</b> (от 1 до 1000):",
+        parse_mode="HTML"
+    )
     return PERCENT
 
 async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -87,10 +97,16 @@ async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         percent = float(percent_str)
         if not (1 <= percent <= 1000):
-            await update.message.reply_text("Процент должен быть от 1 до 1000. Попробуйте снова:")
+            await update.message.reply_text(
+                "❌ Процент должен быть от <b>1</b> до <b>1000</b>. Попробуйте снова:",
+                parse_mode="HTML"
+            )
             return PERCENT
     except ValueError:
-        await update.message.reply_text("Процент должен быть числом. Попробуйте снова:")
+        await update.message.reply_text(
+            "❌ Процент должен быть <b>числом</b>. Попробуйте снова:",
+            parse_mode="HTML"
+        )
         return PERCENT
     
     token_address = temp_data["address"]
@@ -103,14 +119,15 @@ async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     
     await update.message.reply_text(
-        f"Токен '{temp_data['name']}' ({token_address}) добавлен.\n"
-        f"Оповещение при изменении на {percent}%"
+        f"✅ Токен <b>{temp_data['name']}</b> (<a href='tg://msg_url?url={token_address}'>{token_address}</a>) добавлен.<br>"
+        f"Оповещение при изменении на <b>{percent}%</b>",
+        parse_mode="HTML"
     )
     temp_data.clear()
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Добавление токена отменено.")
+    await update.message.reply_text("❌ Добавление токена <b>отменено</b>.", parse_mode="HTML")
     temp_data.clear()
     return ConversationHandler.END
 
@@ -121,16 +138,25 @@ async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     args = context.args
     if len(args) != 1:
-        await update.message.reply_text("Используйте: /remove <адрес_токена>")
+        await update.message.reply_text(
+            "Используйте: <code>/remove <адрес_токена></code>",
+            parse_mode="HTML"
+        )
         return
     
     token_address = args[0]
     if token_address in tracked_tokens[chat_id]:
         token_name = tracked_tokens[chat_id][token_address]["name"]
         del tracked_tokens[chat_id][token_address]
-        await update.message.reply_text(f"Токен '{token_name}' ({token_address}) удалён из отслеживания")
+        await update.message.reply_text(
+            f"✅ Токен <b>{token_name}</b> (<a href='tg://msg_url?url={token_address}'>{token_address}</a>) удалён из отслеживания",
+            parse_mode="HTML"
+        )
     else:
-        await update.message.reply_text("Токен не найден в вашем списке отслеживания")
+        await update.message.reply_text(
+            "❌ Токен не найден в вашем списке отслеживания",
+            parse_mode="HTML"
+        )
 
 async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -138,20 +164,27 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tracked_tokens[chat_id] = {}
     
     if not tracked_tokens[chat_id]:
-        await update.message.reply_text("Ваш список токенов пуст")
+        await update.message.reply_text(
+            "📋 Ваш список токенов <b>пуст</b>",
+            parse_mode="HTML"
+        )
         return
     
-    response = "Ваши отслеживаемые токены:\n"
+    response = "📋 <b>Ваши отслеживаемые токены:</b><br>"
     for token, data in tracked_tokens[chat_id].items():
-        response += f"'{data['name']}' (`{token}`) - {data['percent']}%\n"
-    await update.message.reply_text(response)
+        response += f"<b>{data['name']}</b> (<a href='tg://msg_url?url={token}'>{token}</a>) — <b>{data['percent']}%</b><br>"
+    await update.message.reply_text(response, parse_mode="HTML")
 
 async def check_prices(context: ContextTypes.DEFAULT_TYPE):
     for chat_id in tracked_tokens:
         for token_address, data in list(tracked_tokens[chat_id].items()):
             result = get_token_price(token_address)
             if "error" in result:
-                await context.bot.send_message(chat_id=chat_id, text=f"Ошибка для '{data['name']}' ({token_address}): {result['error']}")
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"❌ Ошибка для <b>{data['name']}</b> (<a href='tg://msg_url?url={token_address}'>{token_address}</a>): <i>{result['error']}</i>",
+                    parse_mode="HTML"
+                )
                 continue
             
             current_price = result["price"]
@@ -162,11 +195,14 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
             if percent_change >= data["percent"]:
                 direction = "выросла" if current_price > last_price else "упала"
                 emoji = "🟢" if current_price > last_price else "🔴"
+                dexscreener_url = f"https://dexscreener.com/solana/{token_address}"
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"{emoji} Цена токена '{data['name']}' {direction} на **{percent_change:.2f}**%!\n"
-                         f"Цена: ${current_price:.6f}\n"
-                         f"Market Cap: ${current_market_cap:,.2f}"
+                    text=f"{emoji} Цена токена <b>{data['name']}</b> {direction} на <b>{percent_change:.2f}%</b>!<br>"
+                         f"Цена: <code>${current_price:.6f}</code><br>"
+                         f"Market Cap: <code>${current_market_cap:,.2f}</code><br>"
+                         f"<a href='{dexscreener_url}'>Чарт на Dexscreener</a>",
+                    parse_mode="HTML"
                 )
                 tracked_tokens[chat_id][token_address]["last_price"] = current_price
                 tracked_tokens[chat_id][token_address]["last_market_cap"] = current_market_cap
