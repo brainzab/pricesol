@@ -26,7 +26,8 @@ def get_token_price(token_address):
         if "pairs" in data and len(data["pairs"]) > 0:
             price_usd = float(data["pairs"][0]["priceUsd"])
             market_cap = float(data["pairs"][0]["fdv"])
-            return {"price": price_usd, "market_cap": market_cap}
+            price_change_24h = float(data["pairs"][0]["priceChange"]["h24"])  # Изменение цены за 24 часа
+            return {"price": price_usd, "market_cap": market_cap, "price_change_24h": price_change_24h}
         else:
             return {"error": "Токен не найден на Dexscreener"}
     
@@ -38,10 +39,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id not in tracked_tokens:
         tracked_tokens[chat_id] = {}
     await update.message.reply_text(
-        "👋 <b>Привет!</b> Я бот для отслеживания цен токенов на Solana.<br>"
-        "<b>Команды:</b><br>"
-        "<code>/add <адрес_токена></code> — начать добавление токена<br>"
-        "<code>/remove <адрес_токена></code> — убрать токен<br>"
+        "👋 <b>Привет!</b> Я бот для отслеживания цен токенов на Solana.\n"
+        "<b>Команды:</b>\n"
+        "<code>/add <адрес_токена></code> — начать добавление токена\n"
+        "<code>/remove <адрес_токена></code> — убрать токен\n"
         "<code>/list</code> — показать список отслеживаемых токенов",
         parse_mode="HTML"
     )
@@ -54,7 +55,7 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) != 1:
         await update.message.reply_text(
-            "Используйте: <code>/add <адрес_токена></code><br>"
+            "Используйте: <code>/add <адрес_токена></code>\n"
             "Пример: <code>/add 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</code>",
             parse_mode="HTML"
         )
@@ -73,9 +74,9 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_data["chat_id"] = chat_id
     
     await update.message.reply_text(
-        f"✅ Токен с адресом <a href='tg://msg_url?url={token_address}'>{token_address}</a> найден.<br>"
-        f"Текущая цена: <b>${result['price']:.6f}</b><br>"
-        f"Текущий Market Cap: <b>${result['market_cap']:,.2f}</b><br>"
+        f"✅ Токен с адресом <a href='tg://msg_url?url={token_address}'>{token_address}</a> найден.\n"
+        f"Текущая цена: <b>${result['price']:.6f}</b>\n"
+        f"Текущий Market Cap: <b>${result['market_cap']:,.2f}</b>\n"
         "Пожалуйста, введите <b>название токена</b>:",
         parse_mode="HTML"
     )
@@ -86,7 +87,7 @@ async def add_token_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_data["name"] = token_name
     
     await update.message.reply_text(
-        f"✅ Название <b>{token_name}</b> принято.<br>"
+        f"✅ Название <b>{token_name}</b> принято.\n"
         "Пожалуйста, введите <b>процент изменения цены</b> (от 1 до 1000):",
         parse_mode="HTML"
     )
@@ -119,7 +120,7 @@ async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     
     await update.message.reply_text(
-        f"✅ Токен <b>{temp_data['name']}</b> (<a href='tg://msg_url?url={token_address}'>{token_address}</a>) добавлен.<br>"
+        f"✅ Токен <b>{temp_data['name']}</b> (<a href='tg://msg_url?url={token_address}'>{token_address}</a>) добавлен.\n"
         f"Оповещение при изменении на <b>{percent}%</b>",
         parse_mode="HTML"
     )
@@ -170,9 +171,19 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    response = "📋 <b>Ваши отслеживаемые токены:</b><br>"
+    response = "📋 <b>Ваши отслеживаемые токены:</b>\n"
     for token, data in tracked_tokens[chat_id].items():
-        response += f"<b>{data['name']}</b> (<a href='tg://msg_url?url={token}'>{token}</a>) — <b>{data['percent']}%</b><br>"
+        result = get_token_price(token)
+        if "error" in result:
+            price_change_24h = "N/A"
+        else:
+            price_change_24h = result["price_change_24h"]
+        
+        dexscreener_url = f"https://dexscreener.com/solana/{token}"
+        response += (f"<b>{data['name']}</b> (<a href='tg://msg_url?url={token}'>{token}</a>)\n"
+                     f"Оповещение: <b>{data['percent']}%</b>\n"
+                     f"Изменение за 24ч: <b>{price_change_24h}%</b>\n"
+                     f"<a href='{dexscreener_url}'>Чарт на Dexscreener</a>\n\n")
     await update.message.reply_text(response, parse_mode="HTML")
 
 async def check_prices(context: ContextTypes.DEFAULT_TYPE):
@@ -198,9 +209,9 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
                 dexscreener_url = f"https://dexscreener.com/solana/{token_address}"
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"{emoji} Цена токена <b>{data['name']}</b> {direction} на <b>{percent_change:.2f}%</b>!<br>"
-                         f"Цена: <code>${current_price:.6f}</code><br>"
-                         f"Market Cap: <code>${current_market_cap:,.2f}</code><br>"
+                    text=f"{emoji} Цена токена <b>{data['name']}</b> {direction} на <b>{percent_change:.2f}%</b>!\n"
+                         f"Цена: <code>${current_price:.6f}</code>\n"
+                         f"Market Cap: <code>${current_market_cap:,.2f}</code>\n"
                          f"<a href='{dexscreener_url}'>Чарт на Dexscreener</a>",
                     parse_mode="HTML"
                 )
