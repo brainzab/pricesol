@@ -5,12 +5,12 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 # Состояния для ConversationHandler
-ADDRESS, NAME, PERCENT = range(3)
+ADDRESS, NAME, PERCENT, EDIT_ADDRESS, EDIT_PERCENT = range(5)  # Добавлены состояния для /edit
 
 # Хранилище токенов: {chat_id: {token_address: {"last_price": float, "percent": float, "last_market_cap": float, "name": str}}}
 tracked_tokens = {}
 
-# Временное хранилище данных во время добавления токена
+# Временное хранилище данных во время добавления или редактирования токена
 temp_data = {}
 
 def get_token_price(token_address):
@@ -44,6 +44,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Команды:</b>\n"
         "<b>/add</b> <i>адрес_токена</i> — начать добавление токена\n"
         "<b>/remove</b> <i>адрес_токена</i> — убрать токен\n"
+        "<b>/remove all</b> — очистить все отслеживаемые токены\n"
+        "<b>/edit</b> <i>адрес_токена</i> — изменить процент отслеживания\n"
         "<b>/list</b> — показать список отслеживаемых токенов",
         parse_mode="HTML"
     )
@@ -56,7 +58,7 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) != 1:
         await update.message.reply_text(
-            "Используйте: <b>/add</b> <i>адрес_токена</i>\n"  # Убран <code>, команды жирные, адрес_токена курсивом
+            "Используйте: <b>/add</b> <i>адрес_токена</i>\n"
             "Пример: <b>/add</b> <i>7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</i>",
             parse_mode="HTML"
         )
@@ -128,8 +130,72 @@ async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_data.clear()
     return ConversationHandler.END
 
+async def edit_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id not in tracked_tokens:
+        tracked_tokens[chat_id] = {}
+    
+    args = context.args
+    if len(args) != 1:
+        await update.message.reply_text(
+            "Используйте: <b>/edit</b> <i>адрес_токена</i>\n"
+            "Пример: <b>/edit</b> <i>7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</i>",
+            parse_mode="HTML"
+        )
+        return ConversationHandler.END
+    
+    token_address = args[0]
+    if token_address not in tracked_tokens[chat_id]:
+        await update.message.reply_text(
+            f"❌ Токен с адресом <code>{token_address}</code> не найден в вашем списке отслеживания",
+            parse_mode="HTML"
+        )
+        return ConversationHandler.END
+    
+    temp_data["address"] = token_address
+    temp_data["chat_id"] = chat_id
+    current_percent = tracked_tokens[chat_id][token_address]["percent"]
+    token_name = tracked_tokens[chat_id][token_address]["name"]
+    
+    await update.message.reply_text(
+        f"✅ Токен <b>{token_name}</b> (<code>{token_address}</code>) найден.\n"
+        f"Текущий процент отслеживания: <b>{current_percent}%</b>\n"
+        "На какой процент изменить (от 1 до 1000)?",
+        parse_mode="HTML"
+    )
+    return EDIT_PERCENT
+
+async def edit_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    percent_str = update.message.text.strip()
+    try:
+        percent = float(percent_str)
+        if not (1 <= percent <= 1000):
+            await update.message.reply_text(
+                "❌ Процент должен быть от <b>1</b> до <b>1000</b>. Попробуйте снова:",
+                parse_mode="HTML"
+            )
+            return EDIT_PERCENT
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Процент должен быть <b>числом</b>. Попробуйте снова:",
+            parse_mode="HTML"
+        )
+        return EDIT_PERCENT
+    
+    token_address = temp_data["address"]
+    chat_id = temp_data["chat_id"]
+    token_name = tracked_tokens[chat_id][token_address]["name"]
+    tracked_tokens[chat_id][token_address]["percent"] = percent
+    
+    await update.message.reply_text(
+        f"✅ Процент отслеживания для токена <b>{token_name}</b> (<code>{token_address}</code>) изменён на <b>{percent}%</b>",
+        parse_mode="HTML"
+    )
+    temp_data.clear()
+    return ConversationHandler.END
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Добавление токена <b>отменено</b>.", parse_mode="HTML")
+    await update.message.reply_text("❌ Добавление или редактирование токена <b>отменено</b>.", parse_mode="HTML")
     temp_data.clear()
     return ConversationHandler.END
 
@@ -141,13 +207,25 @@ async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) != 1:
         await update.message.reply_text(
-            "Используйте: <b>/remove</b> <i>адрес_токена</i>",  # Убран <code>, команда жирная, адрес_токена курсивом
+            "Используйте: <b>/remove</b> <i>адрес_токена</i> или <b>/remove all</b> для очистки всех токенов",
             parse_mode="HTML"
         )
         return
     
     token_address = args[0]
-    if token_address in tracked_tokens[chat_id]:
+    if token_address.lower() == "all":
+        if tracked_tokens[chat_id]:
+            tracked_tokens[chat_id].clear()
+            await update.message.reply_text(
+                "✅ Все отслеживаемые токены удалены.",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text(
+                "❌ У вас нет отслеживаемых токенов для очистки.",
+                parse_mode="HTML"
+            )
+    elif token_address in tracked_tokens[chat_id]:
         token_name = tracked_tokens[chat_id][token_address]["name"]
         del tracked_tokens[chat_id][token_address]
         await update.message.reply_text(
@@ -229,7 +307,8 @@ def main():
     
     application = Application.builder().token(bot_token).build()
     
-    conv_handler = ConversationHandler(
+    # Обработчик для добавления токенов
+    add_handler = ConversationHandler(
         entry_points=[CommandHandler("add", add_token_start)],
         states={
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_token_name)],
@@ -238,7 +317,17 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)]
     )
     
-    application.add_handler(conv_handler)
+    # Обработчик для редактирования процентов
+    edit_handler = ConversationHandler(
+        entry_points=[CommandHandler("edit", edit_token_start)],
+        states={
+            EDIT_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_token_percent)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+    
+    application.add_handler(add_handler)
+    application.add_handler(edit_handler)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("remove", remove_token))
     application.add_handler(CommandHandler("list", list_tokens))
