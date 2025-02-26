@@ -39,7 +39,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id not in tracked_tokens:
         tracked_tokens[chat_id] = {}
     await update.message.reply_text(
-        "👋 <b>Привет!</b> Я/bot для отслеживания цен токенов на Solana.\n"
+        "👋 <b>Привет!</b> Я бот для отслеживания цен токенов на Solana.\n"
         "<b>Команды:</b>\n"
         "<code>/add адрес_токена</code> — начать добавление токена\n"
         "<code>/remove адрес_токена</code> — убрать токен\n"
@@ -74,9 +74,9 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_data["chat_id"] = chat_id
     
     await update.message.reply_text(
-        f"✅ Токен с адресом <a href='tg://msg_url?url={token_address}'>{token_address}</a> найден.\n"
-        f"Текущая цена: <b>${result['price']:.6f}</b>\n"
-        f"Текущий Market Cap: <b>${result['market_cap']:,.2f}</b>\n"
+        f"✅ Токен с адресом <code>{token_address}</code> найден.\n"
+        f"Текущая цена: <b><code>${result['price']:.6f}</code></b>\n"
+        f"Текущий Market Cap: <b><code>${result['market_cap']:,.2f}</code></b>\n"
         "Пожалуйста, введите <b>название токена</b>:",
         parse_mode="HTML"
     )
@@ -120,7 +120,7 @@ async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     
     await update.message.reply_text(
-        f"✅ Токен <b>{temp_data['name']}</b> (<a href='tg://msg_url?url={token_address}'>{token_address}</a>) добавлен.\n"
+        f"✅ Токен <b>{temp_data['name']}</b> (<code>{token_address}</code>) добавлен.\n"
         f"Оповещение при изменении на <b>{percent}%</b>",
         parse_mode="HTML"
     )
@@ -150,7 +150,7 @@ async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
         token_name = tracked_tokens[chat_id][token_address]["name"]
         del tracked_tokens[chat_id][token_address]
         await update.message.reply_text(
-            f"✅ Токен <b>{token_name}</b> (<a href='tg://msg_url?url={token_address}'>{token_address}</a>) удалён из отслеживания",
+            f"✅ Токен <b>{token_name}</b> (<code>{token_address}</code>) удалён из отслеживания",
             parse_mode="HTML"
         )
     else:
@@ -171,7 +171,7 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    response = "📋 <b>Ваши отслеживаемые токены:</b>\n"
+    response = "📋 <b>Ваши отслеживаемые токены:</b>\n\n"
     for token, data in tracked_tokens[chat_id].items():
         result = get_token_price(token)
         if "error" in result:
@@ -182,11 +182,11 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
             emoji_24h = "🟢" if price_change_24h > 0 else "🔴" if price_change_24h < 0 else ""
         
         dexscreener_url = f"https://dexscreener.com/solana/{token}"
-        response += (f"<b>{data['name']}</b> (<a href='tg://msg_url?url={token}'>{token}</a>)\n"
+        response += (f"<b>{data['name']}</b> (<code>{token}</code>)\n"
                      f"Оповещение: <b>{data['percent']}%</b>\n"
                      f"Изменение за 24ч: {emoji_24h} <b>{price_change_24h}%</b>\n"
                      f"<a href='{dexscreener_url}'>Чарт на Dexscreener</a>\n\n")
-    await update.message.reply_text(response, parse_mode="HTML")
+    await update.message.reply_text(response, parse_mode="HTML", disable_web_page_preview=True)
 
 async def check_prices(context: ContextTypes.DEFAULT_TYPE):
     for chat_id in tracked_tokens:
@@ -195,7 +195,7 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
             if "error" in result:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"❌ Ошибка для <b>{data['name']}</b> (<a href='tg://msg_url?url={token_address}'>{token_address}</a>): <i>{result['error']}</i>",
+                    text=f"❌ Ошибка для <b>{data['name']}</b> (<code>{token_address}</code>): <i>{result['error']}</i>",
                     parse_mode="HTML"
                 )
                 continue
@@ -212,10 +212,11 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=f"{emoji} Цена токена <b>{data['name']}</b> {direction} на <b>{percent_change:.2f}%</b>!\n"
-                         f"Цена: <code>${current_price:.6f}</code>\n"
-                         f"Market Cap: <code>${current_market_cap:,.2f}</code>\n"
+                         f"Цена: <b>${current_price:.6f}</b>\n"
+                         f"Market Cap: <b>${current_market_cap:,.2f}</b>\n\n"
                          f"<a href='{dexscreener_url}'>Чарт на Dexscreener</a>",
-                    parse_mode="HTML"
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
                 )
                 tracked_tokens[chat_id][token_address]["last_price"] = current_price
                 tracked_tokens[chat_id][token_address]["last_market_cap"] = current_market_cap
