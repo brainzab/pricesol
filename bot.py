@@ -143,7 +143,7 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     response = "Ваши отслеживаемые токены:\n"
     for token, data in tracked_tokens[chat_id].items():
-        response += f"'{data['name']}' ({token}) - {data['percent']}%\n"
+        response += f"'{data['name']}' (`{token}`) - {data['percent']}%\n"
     await update.message.reply_text(response)
 
 async def check_prices(context: ContextTypes.DEFAULT_TYPE):
