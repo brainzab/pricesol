@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, Conversation
 # Состояния для ConversationHandler
 ADDRESS, NAME, PERCENT = range(3)
 
-# Хранилище токенов
+# Хранилище токенов: {chat_id: {token_address: {"last_price": float, "percent": float, "last_market_cap": float, "name": str}}}
 tracked_tokens = {}
 
 # Временное хранилище данных во время добавления токена
@@ -34,6 +34,9 @@ def get_token_price(token_address):
         return {"error": f"Ошибка: {str(e)}"}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id not in tracked_tokens:
+        tracked_tokens[chat_id] = {}  # Новый пользователь начинает с пустого словаря
     await update.message.reply_text(
         "Привет! Я бот для отслеживания цен токенов на Solana.\n"
         "Команды:\n"
@@ -43,6 +46,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id not in tracked_tokens:
+        tracked_tokens[chat_id] = {}  # Инициализируем пустой словарь для нового пользователя
+    
     args = context.args
     if len(args) != 1:
         await update.message.reply_text("Используйте: /add <адрес_токена>\nПример: /add 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU")
@@ -58,7 +65,7 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_data["address"] = token_address
     temp_data["price"] = result["price"]
     temp_data["market_cap"] = result["market_cap"]
-    temp_data["chat_id"] = update.effective_chat.id
+    temp_data["chat_id"] = chat_id  # Сохраняем chat_id для текущего пользователя
     
     await update.message.reply_text(
         f"Токен с адресом {token_address} найден.\n"
@@ -87,12 +94,12 @@ async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return PERCENT
     
     token_address = temp_data["address"]
-    tracked_tokens[token_address] = {
+    chat_id = temp_data["chat_id"]
+    tracked_tokens[chat_id][token_address] = {
         "last_price": temp_data["price"],
         "percent": percent,
         "last_market_cap": temp_data["market_cap"],
-        "name": temp_data["name"],
-        "chat_id": temp_data["chat_id"]
+        "name": temp_data["name"]
     }
     
     await update.message.reply_text(
@@ -108,52 +115,61 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id not in tracked_tokens:
+        tracked_tokens[chat_id] = {}
+    
     args = context.args
     if len(args) != 1:
         await update.message.reply_text("Используйте: /remove <адрес_токена>")
         return
     
     token_address = args[0]
-    if token_address in tracked_tokens:
-        token_name = tracked_tokens[token_address]["name"]
-        del tracked_tokens[token_address]
+    if token_address in tracked_tokens[chat_id]:
+        token_name = tracked_tokens[chat_id][token_address]["name"]
+        del tracked_tokens[chat_id][token_address]
         await update.message.reply_text(f"Токен '{token_name}' ({token_address}) удалён из отслеживания")
     else:
-        await update.message.reply_text("Токен не найден в списке отслеживания")
+        await update.message.reply_text("Токен не найден в вашем списке отслеживания")
 
 async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not tracked_tokens:
-        await update.message.reply_text("Список токенов пуст")
+    chat_id = update.effective_chat.id
+    if chat_id not in tracked_tokens:
+        tracked_tokens[chat_id] = {}
+    
+    if not tracked_tokens[chat_id]:
+        await update.message.reply_text("Ваш список токенов пуст")
         return
     
-    response = "Отслеживаемые токены:\n"
-    for token, data in tracked_tokens.items():
+    response = "Ваши отслеживаемые токены:\n"
+    for token, data in tracked_tokens[chat_id].items():
         response += f"'{data['name']}' ({token}) - {data['percent']}%\n"
     await update.message.reply_text(response)
 
 async def check_prices(context: ContextTypes.DEFAULT_TYPE):
-    for token_address, data in list(tracked_tokens.items()):
-        result = get_token_price(token_address)
-        if "error" in result:
-            await context.bot.send_message(chat_id=data["chat_id"], text=f"Ошибка для '{data['name']}' ({token_address}): {result['error']}")
-            continue
-        
-        current_price = result["price"]
-        current_market_cap = result["market_cap"]
-        last_price = data["last_price"]
-        percent_change = abs((current_price - last_price) / last_price * 100)
-        
-        if percent_change >= data["percent"]:
-            direction = "выросла" if current_price > last_price else "упала"
-            emoji = "🟢" if current_price > last_price else "🟥"
-            await context.bot.send_message(
-                chat_id=data["chat_id"],
-                text=f"{emoji} Цена токена '{data['name']}' {direction} на {percent_change:.2f}%!\n"
-                     f"Цена: ${current_price:.6f}\n"
-                     f"Market Cap: ${current_market_cap:,.2f}"
-            )
-            tracked_tokens[token_address]["last_price"] = current_price
-            tracked_tokens[token_address]["last_market_cap"] = current_market_cap
+    for chat_id in tracked_tokens:
+        for token_address, data in list(tracked_tokens[chat_id].items()):
+            result = get_token_price(token_address)
+            if "error" in result:
+                await context.bot.send_message(chat_id=chat_id, text=f"Ошибка для '{data['name']}' ({token_address}): {result['error']}")
+                continue
+            
+            current_price = result["price"]
+            current_market_cap = result["market_cap"]
+            last_price = data["last_price"]
+            percent_change = abs((current_price - last_price) / last_price * 100)
+            
+            if percent_change >= data["percent"]:
+                direction = "выросла" if current_price > last_price else "упала"
+                emoji = "🟢" if current_price > last_price else "🟥"
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"{emoji} Цена токена '{data['name']}' {direction} на *{percent_change:.2f}*%!\n"
+                         f"Цена: ${current_price:.6f}\n"
+                         f"Market Cap: ${current_market_cap:,.2f}"
+                )
+                tracked_tokens[chat_id][token_address]["last_price"] = current_price
+                tracked_tokens[chat_id][token_address]["last_market_cap"] = current_market_cap
 
 def main():
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
