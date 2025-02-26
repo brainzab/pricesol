@@ -161,7 +161,7 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
             
             if percent_change >= data["percent"]:
                 direction = "выросла" if current_price > last_price else "упала"
-                emoji = "🟢" if current_price > last_price else "🟥"
+                emoji = "🟢" if current_price > last_price else "🔴"
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=f"{emoji} Цена токена '{data['name']}' {direction} на **{percent_change:.2f}**%!\n"
