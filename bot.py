@@ -164,7 +164,7 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
                 emoji = "🟢" if current_price > last_price else "🟥"
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"{emoji} Цена токена '{data['name']}' {direction} на *{percent_change:.2f}*%!\n"
+                    text=f"{emoji} Цена токена '{data['name']}' {direction} на **{percent_change:.2f}**%!\n"
                          f"Цена: ${current_price:.6f}\n"
                          f"Market Cap: ${current_market_cap:,.2f}"
                 )
