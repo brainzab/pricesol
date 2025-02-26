@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 # Состояния для ConversationHandler
-ADDRESS, NAME, PERCENT, EDIT_ADDRESS, EDIT_PERCENT = range(5)  # Добавлены состояния для /edit
+ADDRESS, NAME, PERCENT, EDIT_ADDRESS, EDIT_PERCENT = range(5)
 
 # Хранилище токенов: {chat_id: {token_address: {"last_price": float, "percent": float, "last_market_cap": float, "name": str}}}
 tracked_tokens = {}
@@ -256,14 +256,19 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "error" in result:
             price_change_24h = "N/A"
             emoji_24h = ""
+            price = "N/A"
+            market_cap = "N/A"
         else:
             price_change_24h = result["price_change_24h"]
             emoji_24h = "🟢" if price_change_24h > 0 else "🔴" if price_change_24h < 0 else ""
+            price = result["price"]
+            market_cap = result["market_cap"]
         
         dexscreener_url = f"https://dexscreener.com/solana/{token}"
         response += (f"<b>{data['name']}</b> (<code>{token}</code>)\n"
                      f"Оповещение: <b>{data['percent']}%</b>\n"
                      f"Изменение за 24ч: {emoji_24h} <b>{price_change_24h}%</b>\n"
+                     f"Цена: <b>${price:.6f}</b> | Market Cap: <b>${market_cap:,.2f}</b>\n"  # Цена и Market Cap в одной строке
                      f"<a href='{dexscreener_url}'><i>Чарт на Dexscreener</i></a>\n\n")
     await update.message.reply_text(response, parse_mode="HTML", disable_web_page_preview=True)
 
