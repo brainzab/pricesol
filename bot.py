@@ -2,22 +2,25 @@ import requests
 import time
 import os
 import asyncio
+import sqlite3
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-from telegram import ReplyKeyboardMarkup
 
 # Состояния для ConversationHandler
 ADDRESS, NAME, PERCENT, EDIT_ADDRESS, EDIT_PERCENT = range(5)
 
-# Хранилище токенов: {chat_id: {token_address: {"last_price": float, "percent": float, "last_market_cap": float, "name": str}}}
+# Путь к базе данных SQLite
+DB_PATH = "tokens.db"
+
+# Хранилище токенов: загружается из и сохраняется в SQLite (глобальная переменная для совместимости с текущим кодом)
 tracked_tokens = {}
 
 # Временное хранилище данных во время добавления или редактирования токена
 temp_data = {}
 
-# Кэш для данных токенов
+# Кэш для данных токенов: загружается из и сохраняется в SQLite
 cache = {}
 CACHE_TIMEOUT = 300  # 5 минут в секундах
 
@@ -35,8 +38,91 @@ def format_number(value, is_price=False):
         return f"${value / 1000000:.2f}M"
     return f"${value:,.2f}"
 
+def init_db():
+    """Инициализирует базу данных SQLite."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Таблица для отслеживаемых токенов
+    cursor.execute('''CREATE TABLE IF NOT EXISTS tracked_tokens
+                     (chat_id INTEGER, token_address TEXT, last_price REAL, percent REAL, 
+                      last_market_cap REAL, name TEXT, timestamp REAL, PRIMARY KEY (chat_id, token_address))''')
+    
+    # Таблица для кэша данных токенов
+    cursor.execute('''CREATE TABLE IF NOT EXISTS token_cache
+                     (token_address TEXT, price REAL, market_cap REAL, price_change_24h REAL, 
+                      timestamp REAL, PRIMARY KEY (token_address))''')
+    
+    conn.commit()
+    conn.close()
+
+def load_tracked_tokens():
+    """Загружает отслеживаемые токены из базы данных."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT chat_id, token_address, last_price, percent, last_market_cap, name, timestamp FROM tracked_tokens")
+    rows = cursor.fetchall()
+    tracked_tokens = {}
+    for row in rows:
+        chat_id, token_address, last_price, percent, last_market_cap, name, timestamp = row
+        if chat_id not in tracked_tokens:
+            tracked_tokens[chat_id] = {}
+        tracked_tokens[chat_id][token_address] = {
+            "last_price": last_price,
+            "percent": percent,
+            "last_market_cap": last_market_cap,
+            "name": name
+        }
+    conn.close()
+    return tracked_tokens
+
+def save_tracked_tokens():
+    """Сохраняет отслеживаемые токены в базу данных."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM tracked_tokens")
+    for chat_id, tokens in tracked_tokens.items():
+        for token_address, data in tokens.items():
+            cursor.execute(
+                "INSERT INTO tracked_tokens VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (chat_id, token_address, data["last_price"], data["percent"],
+                 data["last_market_cap"], data["name"], time.time())
+            )
+    conn.commit()
+    conn.close()
+
+def load_cache():
+    """Загружает кэш токенов из базы данных."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT token_address, price, market_cap, price_change_24h, timestamp FROM token_cache")
+    rows = cursor.fetchall()
+    cache = {}
+    for row in rows:
+        token_address, price, market_cap, price_change_24h, timestamp = row
+        cache[token_address] = {
+            "data": {"price": price, "market_cap": market_cap, "price_change_24h": price_change_24h},
+            "timestamp": timestamp
+        }
+    conn.close()
+    return cache
+
+def save_cache():
+    """Сохраняет кэш токенов в базу данных."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM token_cache")
+    for token_address, data in cache.items():
+        cursor.execute(
+            "INSERT INTO token_cache VALUES (?, ?, ?, ?, ?)",
+            (token_address, data["data"]["price"], data["data"]["market_cap"],
+             data["data"]["price_change_24h"], data["timestamp"])
+        )
+    conn.commit()
+    conn.close()
+
 def get_token_price(token_address):
-    """Получение данных о токене с кэшированием."""
+    """Получение данных о токене с кэшированием из базы данных."""
     current_time = time.time()
     if token_address in cache and (current_time - cache[token_address]["timestamp"]) < CACHE_TIMEOUT:
         return cache[token_address]["data"]
@@ -68,6 +154,7 @@ def get_token_price(token_address):
                 price_change_24h = float(price_change_24h)
             result = {"price": price_usd, "market_cap": market_cap, "price_change_24h": price_change_24h}
             cache[token_address] = {"data": result, "timestamp": current_time}
+            save_cache()
             return result
         else:
             return {"error": "Токен не найден на Dexscreener"}
@@ -87,26 +174,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id not in tracked_tokens:
         tracked_tokens[chat_id] = {}
     
-    # Создаём клавиатуру с командами
-    keyboard = [
-        ["/add", "/remove"],
-        ["/edit", "/list"],
-        ["/stats"]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-    
     await update.message.reply_text(
         "👋 <b>Привет!</b> Я бот для отслеживания цен токенов на Solana.\n"
         "\n"
-        "Используйте кнопки ниже для быстрого доступа к командам или введите команды вручную:\n"
+        "<b>Команды:</b>\n"
         "<b>/add</b> <i>адрес_токена</i> — начать добавление токена\n"
         "<b>/remove</b> <i>адрес_токена</i> — убрать токен\n"
         "<b>/remove all</b> — очистить все отслеживаемые токены\n"
         "<b>/edit</b> <i>адрес_токена</i> — изменить процент отслеживания\n"
         "<b>/list</b> — показать список отслеживаемых токенов\n"
         "<b>/stats</b> — показать статистику токенов",
-        parse_mode="HTML",
-        reply_markup=reply_markup
+        parse_mode="HTML"
     )
 
 async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -193,6 +271,7 @@ async def add_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "last_market_cap": temp_data["market_cap"],
         "name": temp_data["name"]
     }
+    save_tracked_tokens()
     
     await update.message.reply_text(
         f"✅ Токен <b>{temp_data['name']}</b> (<code>{token_address}</code>) добавлен.\n"
@@ -258,6 +337,7 @@ async def edit_token_percent(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = temp_data["chat_id"]
     token_name = tracked_tokens[chat_id][token_address]["name"]
     tracked_tokens[chat_id][token_address]["percent"] = percent
+    save_tracked_tokens()
     
     await update.message.reply_text(
         f"✅ Процент отслеживания для токена <b>{token_name}</b> (<code>{token_address}</code>) изменён на <b>{percent}%</b>",
@@ -288,6 +368,7 @@ async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if token_address.lower() == "all":
         if tracked_tokens[chat_id]:
             tracked_tokens[chat_id].clear()
+            save_tracked_tokens()
             await update.message.reply_text(
                 "✅ Все отслеживаемые токены удалены.",
                 parse_mode="HTML"
@@ -300,6 +381,7 @@ async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif token_address in tracked_tokens[chat_id]:
         token_name = tracked_tokens[chat_id][token_address]["name"]
         del tracked_tokens[chat_id][token_address]
+        save_tracked_tokens()
         await update.message.reply_text(
             f"✅ Токен <b>{token_name}</b> (<code>{token_address}</code>) удалён из отслеживания",
             parse_mode="HTML"
@@ -428,8 +510,15 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
                 )
                 tracked_tokens[chat_id][token_address]["last_price"] = current_price
                 tracked_tokens[chat_id][token_address]["last_market_cap"] = current_market_cap
+                save_tracked_tokens()
 
 def main():
+    # Инициализация и загрузка данных из базы данных
+    init_db()
+    global tracked_tokens, cache
+    tracked_tokens = load_tracked_tokens()
+    cache = load_cache()
+    
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not bot_token:
         raise ValueError("TELEGRAM_BOT_TOKEN не задан в переменных окружения")
@@ -464,7 +553,12 @@ def main():
     
     application.job_queue.run_repeating(check_prices, interval=60, first=10)
     
-    application.run_polling()
+    # Сохраняем данные при завершении работы
+    try:
+        application.run_polling()
+    finally:
+        save_tracked_tokens()
+        save_cache()
 
 if __name__ == "__main__":
     main()
