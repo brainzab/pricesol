@@ -1,6 +1,7 @@
 import requests
 import time
 import os
+import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 from requests.adapters import HTTPAdapter
@@ -15,8 +16,28 @@ tracked_tokens = {}
 # Временное хранилище данных во время добавления или редактирования токена
 temp_data = {}
 
+# Кэш для данных токенов
+cache = {}
+CACHE_TIMEOUT = 300  # 5 минут в секундах
+
+# Лимит токенов на пользователя
+MAX_TOKENS_PER_USER = 50
+
+# ID администратора для уведомлений о сбоях (задайте через переменную окружения ADMIN_CHAT_ID)
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Добавьте в Railway переменную окружения
+
+def format_number(value):
+    """Форматирует большие числа в сокращённый вид (например, $1.23M)."""
+    if isinstance(value, float) and value >= 1000000:
+        return f"${value / 1000000:.2f}M"
+    return f"${value:,.2f}"
+
 def get_token_price(token_address):
-    # Настройка сессии с повторными попытками
+    """Получение данных о токене с кэшированием."""
+    current_time = time.time()
+    if token_address in cache and (current_time - cache[token_address]["timestamp"]) < CACHE_TIMEOUT:
+        return cache[token_address]["data"]
+    
     session = requests.Session()
     retry_strategy = Retry(
         total=3,  # Количество попыток
@@ -28,7 +49,7 @@ def get_token_price(token_address):
     
     try:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-        response = session.get(url, timeout=15)  # Увеличен тайм-аут до 15 секунд
+        response = session.get(url, timeout=15)
         
         if response.status_code != 200:
             return {"error": f"Ошибка API: {response.status_code}"}
@@ -39,11 +60,12 @@ def get_token_price(token_address):
             pair = data["pairs"][0]
             price_usd = float(pair["priceUsd"])
             market_cap = float(pair["fdv"])
-            # Безопасно получаем priceChange.h24, если его нет — "N/A"
             price_change_24h = pair.get("priceChange", {}).get("h24", "N/A")
             if price_change_24h != "N/A":
                 price_change_24h = float(price_change_24h)
-            return {"price": price_usd, "market_cap": market_cap, "price_change_24h": price_change_24h}
+            result = {"price": price_usd, "market_cap": market_cap, "price_change_24h": price_change_24h}
+            cache[token_address] = {"data": result, "timestamp": current_time}
+            return result
         else:
             return {"error": "Токен не найден на Dexscreener"}
     
@@ -51,6 +73,11 @@ def get_token_price(token_address):
         return {"error": "Тайм-аут соединения с API Dexscreener"}
     except Exception as e:
         return {"error": f"Ошибка: {str(e)}"}
+
+async def async_get_token_price(token_address):
+    """Асинхронная обёртка для get_token_price."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, get_token_price, token_address)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -64,7 +91,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>/remove</b> <i>адрес_токена</i> — убрать токен\n"
         "<b>/remove all</b> — очистить все отслеживаемые токены\n"
         "<b>/edit</b> <i>адрес_токена</i> — изменить процент отслеживания\n"
-        "<b>/list</b> — показать список отслеживаемых токенов",
+        "<b>/list</b> — показать список отслеживаемых токенов\n"
+        "<b>/stats</b> — показать статистику токенов",
         parse_mode="HTML"
     )
 
@@ -72,6 +100,13 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id not in tracked_tokens:
         tracked_tokens[chat_id] = {}
+    
+    if len(tracked_tokens[chat_id]) >= MAX_TOKENS_PER_USER:
+        await update.message.reply_text(
+            f"❌ Достигнут лимит в <b>{MAX_TOKENS_PER_USER}</b> токенов. Удалите существующие токены, чтобы добавить новые.",
+            parse_mode="HTML"
+        )
+        return ConversationHandler.END
     
     args = context.args
     if len(args) != 1:
@@ -87,6 +122,12 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if "error" in result:
         await update.message.reply_text(f"❌ Не удалось найти токен: <i>{result['error']}</i>", parse_mode="HTML")
+        if ADMIN_CHAT_ID and "Тайм-аут" in result["error"]:
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=f"⚠️ Тайм-аут при запросе токена <code>{token_address}</code>",
+                parse_mode="HTML"
+            )
         return ConversationHandler.END
     
     temp_data["address"] = token_address
@@ -96,8 +137,8 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"✅ Токен с адресом <code>{token_address}</code> найден.\n"
-        f"Текущая цена: <b>${result['price']:.6f}</b>\n"
-        f"Текущий Market Cap: <b>${result['market_cap']:,.2f}</b>\n"
+        f"Текущая цена: <b>{format_number(result['price'])}</b>\n"
+        f"Текущий Market Cap: <b>{format_number(result['market_cap'])}</b>\n"
         "Пожалуйста, введите <b>название токена</b>:",
         parse_mode="HTML"
     )
@@ -256,6 +297,42 @@ async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id not in tracked_tokens:
+        tracked_tokens[chat_id] = {}
+    
+    if not tracked_tokens[chat_id]:
+        await update.message.reply_text(
+            "📊 <b>Статистика:</b>\n"
+            "У вас нет отслеживаемых токенов.",
+            parse_mode="HTML"
+        )
+        return
+    
+    token_count = len(tracked_tokens[chat_id])
+    total_change_24h = 0
+    valid_tokens = 0
+    
+    # Асинхронно запрашиваем данные для всех токенов
+    tasks = [async_get_token_price(token) for token in tracked_tokens[chat_id]]
+    results = await asyncio.gather(*tasks)
+    
+    for result in results:
+        if "error" not in result and result["price_change_24h"] != "N/A":
+            total_change_24h += result["price_change_24h"]
+            valid_tokens += 1
+    
+    avg_change_24h = total_change_24h / valid_tokens if valid_tokens > 0 else 0
+    emoji_avg = "🟢" if avg_change_24h > 0 else "🔴" if avg_change_24h < 0 else ""
+    
+    await update.message.reply_text(
+        f"📊 <b>Статистика:</b>\n"
+        f"Токенов отслеживается: <b>{token_count}</b>\n"
+        f"Среднее изменение за 24ч: {emoji_avg} <b>{avg_change_24h:.2f}%</b>",
+        parse_mode="HTML"
+    )
+
 async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id not in tracked_tokens:
@@ -269,13 +346,23 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     response = "📋 <b>Ваши отслеживаемые токены:</b>\n\n"
-    for token, data in tracked_tokens[chat_id].items():
-        result = get_token_price(token)
+    
+    # Асинхронно запрашиваем данные для всех токенов
+    tasks = [async_get_token_price(token) for token in tracked_tokens[chat_id]]
+    results = await asyncio.gather(*tasks)
+    
+    for token, data, result in zip(tracked_tokens[chat_id].keys(), tracked_tokens[chat_id].values(), results):
         if "error" in result:
             price_change_24h = "N/A"
             emoji_24h = ""
             price = "N/A"
             market_cap = "N/A"
+            if ADMIN_CHAT_ID and "Тайм-аут" in result["error"]:
+                await context.bot.send_message(
+                    chat_id=ADMIN_CHAT_ID,
+                    text=f"⚠️ Тайм-аут при запросе токена <code>{token}</code> в /list",
+                    parse_mode="HTML"
+                )
         else:
             price_change_24h = result["price_change_24h"]
             emoji_24h = "🟢" if price_change_24h > 0 else "🔴" if price_change_24h < 0 else ""
@@ -286,7 +373,7 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response += (f"<b>{data['name']}</b> (<code>{token}</code>)\n"
                      f"Оповещение: <b>{data['percent']}%</b>\n"
                      f"Изменение за 24ч: {emoji_24h} <b>{price_change_24h}%</b>\n"
-                     f"Цена: <b>${price:.6f}</b> | Market Cap: <b>${market_cap:,.2f}</b>\n"
+                     f"Цена: <b>{format_number(price)}</b> | Market Cap: <b>{format_number(market_cap)}</b>\n"
                      f"<a href='{dexscreener_url}'><i>Чарт на Dexscreener</i></a>\n\n")
     await update.message.reply_text(response, parse_mode="HTML", disable_web_page_preview=True)
 
@@ -300,6 +387,12 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
                     text=f"❌ Ошибка для <b>{data['name']}</b> (<code>{token_address}</code>): <i>{result['error']}</i>",
                     parse_mode="HTML"
                 )
+                if ADMIN_CHAT_ID and "Тайм-аут" in result["error"]:
+                    await context.bot.send_message(
+                        chat_id=ADMIN_CHAT_ID,
+                        text=f"⚠️ Тайм-аут при проверке токена <code>{token_address}</code>",
+                        parse_mode="HTML"
+                    )
                 continue
             
             current_price = result["price"]
@@ -314,8 +407,8 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=f"{emoji} Цена токена <b>{data['name']}</b> {direction} на <b>{percent_change:.2f}%</b>!\n"
-                         f"Цена: <b>${current_price:.6f}</b>\n"
-                         f"Market Cap: <b>${current_market_cap:,.2f}</b>\n\n"
+                         f"Цена: <b>{format_number(current_price)}</b>\n"
+                         f"Market Cap: <b>{format_number(current_market_cap)}</b>\n\n"
                          f"<a href='{dexscreener_url}'><i>Чарт на Dexscreener</i></a>",
                     parse_mode="HTML",
                     disable_web_page_preview=True
@@ -354,6 +447,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("remove", remove_token))
     application.add_handler(CommandHandler("list", list_tokens))
+    application.add_handler(CommandHandler("stats", stats))  # Новый обработчик
     
     application.job_queue.run_repeating(check_prices, interval=60, first=10)
     
