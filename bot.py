@@ -3,6 +3,8 @@ import time
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 # Состояния для ConversationHandler
 ADDRESS, NAME, PERCENT, EDIT_ADDRESS, EDIT_PERCENT = range(5)
@@ -14,9 +16,19 @@ tracked_tokens = {}
 temp_data = {}
 
 def get_token_price(token_address):
+    # Настройка сессии с повторными попытками
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,  # Количество попыток
+        backoff_factor=1,  # Задержка между попытками (1 сек, 2 сек, 4 сек)
+        status_forcelist=[429, 500, 502, 503, 504],  # Коды ошибок для повторных попыток
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    
     try:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-        response = requests.get(url, timeout=10)
+        response = session.get(url, timeout=15)  # Увеличен тайм-аут до 15 секунд
         
         if response.status_code != 200:
             return {"error": f"Ошибка API: {response.status_code}"}
@@ -24,13 +36,19 @@ def get_token_price(token_address):
         data = response.json()
         
         if "pairs" in data and len(data["pairs"]) > 0:
-            price_usd = float(data["pairs"][0]["priceUsd"])
-            market_cap = float(data["pairs"][0]["fdv"])
-            price_change_24h = float(data["pairs"][0]["priceChange"]["h24"])
+            pair = data["pairs"][0]
+            price_usd = float(pair["priceUsd"])
+            market_cap = float(pair["fdv"])
+            # Безопасно получаем priceChange.h24, если его нет — "N/A"
+            price_change_24h = pair.get("priceChange", {}).get("h24", "N/A")
+            if price_change_24h != "N/A":
+                price_change_24h = float(price_change_24h)
             return {"price": price_usd, "market_cap": market_cap, "price_change_24h": price_change_24h}
         else:
             return {"error": "Токен не найден на Dexscreener"}
     
+    except requests.exceptions.ReadTimeout:
+        return {"error": "Тайм-аут соединения с API Dexscreener"}
     except Exception as e:
         return {"error": f"Ошибка: {str(e)}"}
 
@@ -268,7 +286,7 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response += (f"<b>{data['name']}</b> (<code>{token}</code>)\n"
                      f"Оповещение: <b>{data['percent']}%</b>\n"
                      f"Изменение за 24ч: {emoji_24h} <b>{price_change_24h}%</b>\n"
-                     f"Цена: <b>${price:.6f}</b> | Market Cap: <b>${market_cap:,.2f}</b>\n"  # Цена и Market Cap в одной строке
+                     f"Цена: <b>${price:.6f}</b> | Market Cap: <b>${market_cap:,.2f}</b>\n"
                      f"<a href='{dexscreener_url}'><i>Чарт на Dexscreener</i></a>\n\n")
     await update.message.reply_text(response, parse_mode="HTML", disable_web_page_preview=True)
 
