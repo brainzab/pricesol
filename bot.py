@@ -145,22 +145,28 @@ def get_token_price(token_address):
         
         data = response.json()
         
-        if "pairs" in data and len(data["pairs"]) > 0:
-            pair = data["pairs"][0]
-            price_usd = float(pair["priceUsd"])
-            market_cap = float(pair["fdv"])
-            price_change_24h = pair.get("priceChange", {}).get("h24", "N/A")
-            if price_change_24h != "N/A":
-                price_change_24h = float(price_change_24h)
-            result = {"price": price_usd, "market_cap": market_cap, "price_change_24h": price_change_24h}
-            cache[token_address] = {"data": result, "timestamp": current_time}
-            save_cache()
-            return result
-        else:
+        # Проверка на None или некорректный формат данных
+        if data is None or not isinstance(data, dict):
+            return {"error": "Неверный формат ответа от API"}
+        
+        if "pairs" not in data or not data["pairs"] or len(data["pairs"]) == 0:
             return {"error": "Токен не найден на Dexscreener"}
+        
+        pair = data["pairs"][0]
+        price_usd = float(pair["priceUsd"])
+        market_cap = float(pair["fdv"])
+        price_change_24h = pair.get("priceChange", {}).get("h24", "N/A")
+        if price_change_24h != "N/A":
+            price_change_24h = float(price_change_24h)
+        result = {"price": price_usd, "market_cap": market_cap, "price_change_24h": price_change_24h}
+        cache[token_address] = {"data": result, "timestamp": current_time}
+        save_cache()
+        return result
     
     except requests.exceptions.ReadTimeout:
         return {"error": "Тайм-аут соединения с API Dexscreener"}
+    except (ValueError, KeyError, TypeError) as e:
+        return {"error": f"Неверный адрес токена или ошибка данных: {str(e)}"}
     except Exception as e:
         return {"error": f"Ошибка: {str(e)}"}
 
@@ -212,7 +218,16 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = get_token_price(token_address)
     
     if "error" in result:
-        await update.message.reply_text(f"❌ Не удалось найти токен: <i>{result['error']}</i>", parse_mode="HTML")
+        if "Неверный адрес токена" in result["error"]:
+            await update.message.reply_text(
+                "❌ Неверный адрес токена. Убедитесь, что вы ввели корректный адрес токена на Solana и попробуйте снова.",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ Не удалось найти токен: <i>{result['error']}</i>",
+                parse_mode="HTML"
+            )
         if ADMIN_CHAT_ID and "Тайм-аут" in result["error"]:
             await context.bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
