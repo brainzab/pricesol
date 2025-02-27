@@ -26,9 +26,9 @@ MAX_TOKENS_PER_USER = 50
 # ID администратора для уведомлений о сбоях (задайте через переменную окружения ADMIN_CHAT_ID)
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Добавьте в Railway переменную окружения
 
-def format_number(value):
-    """Форматирует большие числа в сокращённый вид (например, $1.23M)."""
-    if isinstance(value, float) and value >= 1000000:
+def format_number(value, is_price=False):
+    """Форматирует большие числа в сокращённый вид только для Market Cap."""
+    if not is_price and isinstance(value, float) and value >= 1000000:  # Не сокращаем цену
         return f"${value / 1000000:.2f}M"
     return f"${value:,.2f}"
 
@@ -137,7 +137,7 @@ async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"✅ Токен с адресом <code>{token_address}</code> найден.\n"
-        f"Текущая цена: <b>{format_number(result['price'])}</b>\n"
+        f"Текущая цена: <b>{format_number(result['price'], is_price=True)}</b>\n"
         f"Текущий Market Cap: <b>{format_number(result['market_cap'])}</b>\n"
         "Пожалуйста, введите <b>название токена</b>:",
         parse_mode="HTML"
@@ -373,7 +373,7 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response += (f"<b>{data['name']}</b> (<code>{token}</code>)\n"
                      f"Оповещение: <b>{data['percent']}%</b>\n"
                      f"Изменение за 24ч: {emoji_24h} <b>{price_change_24h}%</b>\n"
-                     f"Цена: <b>{format_number(price)}</b> | Market Cap: <b>{format_number(market_cap)}</b>\n"
+                     f"Цена: <b>{format_number(price, is_price=True)}</b> | Market Cap: <b>{format_number(market_cap)}</b>\n"
                      f"<a href='{dexscreener_url}'><i>Чарт на Dexscreener</i></a>\n\n")
     await update.message.reply_text(response, parse_mode="HTML", disable_web_page_preview=True)
 
@@ -407,7 +407,7 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=f"{emoji} Цена токена <b>{data['name']}</b> {direction} на <b>{percent_change:.2f}%</b>!\n"
-                         f"Цена: <b>{format_number(current_price)}</b>\n"
+                         f"Цена: <b>{format_number(current_price, is_price=True)}</b>\n"
                          f"Market Cap: <b>{format_number(current_market_cap)}</b>\n\n"
                          f"<a href='{dexscreener_url}'><i>Чарт на Dexscreener</i></a>",
                     parse_mode="HTML",
@@ -447,7 +447,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("remove", remove_token))
     application.add_handler(CommandHandler("list", list_tokens))
-    application.add_handler(CommandHandler("stats", stats))  # Новый обработчик
+    application.add_handler(CommandHandler("stats", stats))
     
     application.job_queue.run_repeating(check_prices, interval=60, first=10)
     
