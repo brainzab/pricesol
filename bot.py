@@ -27,8 +27,10 @@ MAX_TOKENS_PER_USER = 50
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Добавьте в Railway переменную окружения
 
 def format_number(value, is_price=False):
-    """Форматирует большие числа в сокращённый вид только для Market Cap."""
-    if not is_price and isinstance(value, float) and value >= 1000000:  # Не сокращаем цену
+    """Форматирует большие числа в сокращённый вид только для Market Cap, цена всегда полная."""
+    if is_price:  # Для цены всегда полный формат
+        return f"${value:,.6f}"
+    elif isinstance(value, float) and value >= 1000000:  # Для Market Cap сокращаем большие числа
         return f"${value / 1000000:.2f}M"
     return f"${value:,.2f}"
 
