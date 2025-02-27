@@ -6,7 +6,6 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-from telegram import BotCommand
 
 # Состояния для ConversationHandler
 ADDRESS, NAME, PERCENT, EDIT_ADDRESS, EDIT_PERCENT = range(5)
@@ -87,7 +86,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 <b>Привет!</b> Я бот для отслеживания цен токенов на Solana.\n"
         "\n"
-        "Список команд доступен в меню (три точки в правом верхнем углу).",
+        "<b>Команды:</b>\n"
+        "<b>/add</b> <i>адрес_токена</i> — начать добавление токена\n"
+        "<b>/remove</b> <i>адрес_токена</i> — убрать токен\n"
+        "<b>/remove all</b> — очистить все отслеживаемые токены\n"
+        "<b>/edit</b> <i>адрес_токена</i> — изменить процент отслеживания\n"
+        "<b>/list</b> — показать список отслеживаемых токенов\n"
+        "<b>/stats</b> — показать статистику токенов",
         parse_mode="HTML"
     )
 
@@ -416,21 +421,7 @@ def main():
     if not bot_token:
         raise ValueError("TELEGRAM_BOT_TOKEN не задан в переменных окружения")
     
-    # Настройка списка команд для меню
-    commands = [
-        BotCommand("start", "Показать приветствие и команды"),
-        BotCommand("add", "Добавить новый токен для отслеживания"),
-        BotCommand("remove", "Удалить токен из отслеживания"),
-        BotCommand("remove all", "Очистить все отслеживаемые токены"),
-        BotCommand("edit", "Изменить процент отслеживания токена"),
-        BotCommand("list", "Показать список отслеживаемых токенов"),
-        BotCommand("stats", "Показать статистику токенов"),
-    ]
-    
     application = Application.builder().token(bot_token).build()
-    
-    # Устанавливаем команды в меню
-    application.bot.set_my_commands(commands)
     
     # Обработчик для добавления токенов
     add_handler = ConversationHandler(
