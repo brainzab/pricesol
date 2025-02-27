@@ -6,6 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
+from telegram import ReplyKeyboardMarkup
 
 # Состояния для ConversationHandler
 ADDRESS, NAME, PERCENT, EDIT_ADDRESS, EDIT_PERCENT = range(5)
@@ -27,7 +28,7 @@ MAX_TOKENS_PER_USER = 50
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Добавьте в Railway переменную окружения
 
 def format_number(value, is_price=False):
-    """Форматирует большие числа в сокращённый вид только для Market Cap, цена всегда полная."""
+    """Форматирует большие числа в сокращённый вид только для Market Cap."""
     if is_price:  # Для цены всегда полный формат
         return f"${value:,.6f}"
     elif isinstance(value, float) and value >= 1000000:  # Для Market Cap сокращаем большие числа
@@ -85,17 +86,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id not in tracked_tokens:
         tracked_tokens[chat_id] = {}
+    
+    # Создаём клавиатуру с командами
+    keyboard = [
+        ["/add", "/remove"],
+        ["/edit", "/list"],
+        ["/stats"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    
     await update.message.reply_text(
         "👋 <b>Привет!</b> Я бот для отслеживания цен токенов на Solana.\n"
         "\n"
-        "<b>Команды:</b>\n"
+        "Используйте кнопки ниже для быстрого доступа к командам или введите команды вручную:\n"
         "<b>/add</b> <i>адрес_токена</i> — начать добавление токена\n"
         "<b>/remove</b> <i>адрес_токена</i> — убрать токен\n"
         "<b>/remove all</b> — очистить все отслеживаемые токены\n"
         "<b>/edit</b> <i>адрес_токена</i> — изменить процент отслеживания\n"
         "<b>/list</b> — показать список отслеживаемых токенов\n"
         "<b>/stats</b> — показать статистику токенов",
-        parse_mode="HTML"
+        parse_mode="HTML",
+        reply_markup=reply_markup
     )
 
 async def add_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
